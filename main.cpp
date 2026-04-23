@@ -30,8 +30,9 @@ struct Team {
     ProblemInfo problems[MAX_PROBLEMS];
     vector<int> solve_times;
     int rank;
+    int index;
 
-    Team() : solved_problems(0), total_penalty(0), rank(0) {
+    Team() : solved_problems(0), total_penalty(0), rank(0), index(-1) {
         for (int i = 0; i < MAX_PROBLEMS; i++) {
             problems[i] = ProblemInfo();
         }
@@ -41,6 +42,7 @@ struct Team {
         solved_problems = 0;
         total_penalty = 0;
         rank = 0;
+        index = -1;
         solve_times.clear();
         for (int i = 0; i < MAX_PROBLEMS; i++) {
             problems[i] = ProblemInfo();
@@ -174,6 +176,7 @@ public:
 
         teams[team_count].name = team_name;
         teams[team_count].clear();
+        teams[team_count].index = team_count;
         team_index[team_name] = team_count;
         team_count++;
         cout << "[Info]Add successfully.\n";
@@ -258,14 +261,14 @@ public:
         // Process unfreezing
         while (true) {
             // Build current frozen state
-            map<string, vector<char>> team_frozen_problems;
+            map<int, vector<int>> team_frozen_problems;  // team_index -> problem_indices
 
             // Collect all frozen problems
             for (int i = 0; i < team_count; i++) {
                 const Team& team = teams[i];
                 for (int p = 0; p < problem_count; p++) {
                     if (!team.problems[p].solved && team.problems[p].submissions_after_freeze > 0) {
-                        team_frozen_problems[team.name].push_back('A' + p);
+                        team_frozen_problems[i].push_back(p);
                     }
                 }
             }
@@ -273,33 +276,31 @@ public:
             if (team_frozen_problems.empty()) break;
 
             // Find lowest ranked team with frozen problems
-            string target_team;
-            char target_problem = 0;
+            int target_team_idx = -1;
+            int target_problem = -1;
 
             for (int i = sorted_teams.size() - 1; i >= 0; i--) {
-                const Team& team = *sorted_teams[i];
-                if (team_frozen_problems.count(team.name)) {
-                    target_team = team.name;
+                int team_idx = sorted_teams[i]->index;
+                if (team_frozen_problems.count(team_idx)) {
+                    target_team_idx = team_idx;
                     // Find smallest problem letter
-                    target_problem = *min_element(team_frozen_problems[team.name].begin(),
-                                                 team_frozen_problems[team.name].end());
+                    target_problem = *min_element(team_frozen_problems[team_idx].begin(),
+                                                 team_frozen_problems[team_idx].end());
                     break;
                 }
             }
 
-            if (target_team.empty()) break;
+            if (target_team_idx == -1) break;
 
             // Unfreeze this problem
-            int team_idx = team_index[target_team];
-            Team& team = teams[team_idx];
-            int prob_idx = target_problem - 'A';
-            ProblemInfo& info = team.problems[prob_idx];
+            Team& team = teams[target_team_idx];
+            ProblemInfo& info = team.problems[target_problem];
             info.submissions_after_freeze = 0;
 
             // Store old ranking
-            vector<string> old_order;
+            vector<int> old_order;
             for (Team* t : sorted_teams) {
-                old_order.push_back(t->name);
+                old_order.push_back(t->index);
             }
 
             // Update ranking
@@ -308,13 +309,13 @@ public:
             // Find if this team's ranking changed
             int old_rank = -1, new_rank = -1;
             for (int i = 0; i < old_order.size(); i++) {
-                if (old_order[i] == target_team) {
+                if (old_order[i] == target_team_idx) {
                     old_rank = i + 1;
                     break;
                 }
             }
             for (int i = 0; i < sorted_teams.size(); i++) {
-                if (sorted_teams[i]->name == target_team) {
+                if (sorted_teams[i]->index == target_team_idx) {
                     new_rank = i + 1;
                     break;
                 }
@@ -325,13 +326,13 @@ public:
                 string replaced_team;
                 if (new_rank < old_rank) {
                     // Moved up - replaced the team at new_rank
-                    replaced_team = old_order[new_rank - 1];
+                    replaced_team = teams[old_order[new_rank - 1]].name;
                 } else {
                     // Moved down - replaced the team at old_rank
-                    replaced_team = old_order[old_rank - 1];
+                    replaced_team = teams[old_order[old_rank - 1]].name;
                 }
 
-                cout << target_team << " " << replaced_team << " "
+                cout << team.name << " " << replaced_team << " "
                      << team.solved_problems << " " << team.total_penalty << "\n";
             }
         }
