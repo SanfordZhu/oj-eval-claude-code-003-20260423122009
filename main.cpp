@@ -30,9 +30,8 @@ struct Team {
     ProblemInfo problems[MAX_PROBLEMS];
     vector<int> solve_times;
     int rank;
-    bool has_been_flushed;  // Track if this team has been included in a flush
 
-    Team() : solved_problems(0), total_penalty(0), rank(0), has_been_flushed(false) {
+    Team() : solved_problems(0), total_penalty(0), rank(0) {
         for (int i = 0; i < MAX_PROBLEMS; i++) {
             problems[i] = ProblemInfo();
         }
@@ -42,7 +41,6 @@ struct Team {
         solved_problems = 0;
         total_penalty = 0;
         rank = 0;
-        has_been_flushed = false;
         solve_times.clear();
         for (int i = 0; i < MAX_PROBLEMS; i++) {
             problems[i] = ProblemInfo();
@@ -64,17 +62,6 @@ struct Submission {
 // Fast string comparison for team names
 struct TeamComparator {
     bool operator()(const Team* a, const Team* b) const {
-        // Before first flush, sort by lexicographic order
-        if (!a->has_been_flushed || !b->has_been_flushed) {
-            // If both haven't been flushed, compare names
-            // If one has been flushed and other hasn't, flushed ones come first
-            if (a->has_been_flushed != b->has_been_flushed) {
-                return a->has_been_flushed > b->has_been_flushed;
-            }
-            return a->name < b->name;
-        }
-
-        // After flush, use competition rules
         if (a->solved_problems != b->solved_problems)
             return a->solved_problems > b->solved_problems;
         if (a->total_penalty != b->total_penalty)
@@ -112,14 +99,18 @@ private:
         for (int i = 0; i < team_count; i++) {
             sorted_teams.push_back(&teams[i]);
         }
-        sort(sorted_teams.begin(), sorted_teams.end(), TeamComparator());
+
+        // Before first flush, sort by lexicographic order
+        if (!has_flushed) {
+            sort(sorted_teams.begin(), sorted_teams.end(),
+                [](const Team* a, const Team* b) { return a->name < b->name; });
+        } else {
+            sort(sorted_teams.begin(), sorted_teams.end(), TeamComparator());
+        }
 
         // Update ranks
         for (int i = 0; i < sorted_teams.size(); i++) {
             sorted_teams[i]->rank = i + 1;
-            if (has_flushed) {
-                sorted_teams[i]->has_been_flushed = true;
-            }
         }
     }
 
@@ -238,6 +229,7 @@ public:
         has_flushed = true;
         updateRanking();
         cout << "[Info]Flush scoreboard.\n";
+        printScoreboard();
     }
 
     void freeze() {
