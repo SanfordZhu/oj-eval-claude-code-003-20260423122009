@@ -7,8 +7,12 @@
 #include <sstream>
 #include <iomanip>
 #include <queue>
+#include <cstring>
 
 using namespace std;
+
+const int MAX_TEAMS = 10000;
+const int MAX_PROBLEMS = 26;
 
 struct ProblemInfo {
     bool solved;
@@ -23,28 +27,24 @@ struct Team {
     string name;
     int solved_problems;
     int total_penalty;
-    map<char, ProblemInfo> problems;
+    ProblemInfo problems[MAX_PROBLEMS];
     vector<int> solve_times;
+    int rank;
 
-    Team() : solved_problems(0), total_penalty(0) {}
-
-    // For sorting
-    bool operator<(const Team& other) const {
-        if (solved_problems != other.solved_problems)
-            return solved_problems > other.solved_problems;
-        if (total_penalty != other.total_penalty)
-            return total_penalty < other.total_penalty;
-
-        // Compare solve times in descending order
-        for (int i = (int)solve_times.size() - 1; i >= 0; i--) {
-            if (i >= (int)other.solve_times.size()) return true;
-            if (solve_times[i] != other.solve_times[i])
-                return solve_times[i] < other.solve_times[i];
+    Team() : solved_problems(0), total_penalty(0), rank(0) {
+        for (int i = 0; i < MAX_PROBLEMS; i++) {
+            problems[i] = ProblemInfo();
         }
-        if (solve_times.size() != other.solve_times.size())
-            return solve_times.size() > other.solve_times.size();
+    }
 
-        return name < other.name;
+    void clear() {
+        solved_problems = 0;
+        total_penalty = 0;
+        rank = 0;
+        solve_times.clear();
+        for (int i = 0; i < MAX_PROBLEMS; i++) {
+            problems[i] = ProblemInfo();
+        }
     }
 };
 
@@ -54,49 +54,73 @@ struct Submission {
     string status;
     int time;
 
+    Submission() : problem(0), time(0) {}
     Submission(string t, char p, string s, int ti)
         : team(t), problem(p), status(s), time(ti) {}
 };
 
+// Fast string comparison for team names
+struct TeamComparator {
+    bool operator()(const Team* a, const Team* b) const {
+        if (a->solved_problems != b->solved_problems)
+            return a->solved_problems > b->solved_problems;
+        if (a->total_penalty != b->total_penalty)
+            return a->total_penalty < b->total_penalty;
+
+        // Compare solve times in descending order
+        int a_size = a->solve_times.size();
+        int b_size = b->solve_times.size();
+        for (int i = a_size - 1, j = b_size - 1; i >= 0 && j >= 0; i--, j--) {
+            if (a->solve_times[i] != b->solve_times[j])
+                return a->solve_times[i] < b->solve_times[j];
+        }
+        if (a_size != b_size)
+            return a_size > b_size;
+
+        return a->name < b->name;
+    }
+};
+
 class ICPCManager {
 private:
-    map<string, Team> teams;
-    vector<string> team_order;  // Order of teams added
+    Team teams[MAX_TEAMS];
+    int team_count;
+    map<string, int> team_index;
     bool competition_started;
     bool frozen;
     int duration_time;
     int problem_count;
     vector<Submission> all_submissions;
+    vector<Team*> sorted_teams;
 
-    vector<Team> getSortedTeams() {
-        vector<Team> sorted_teams;
-        for (const auto& p : teams) {
-            sorted_teams.push_back(p.second);
+    void updateRanking() {
+        sorted_teams.clear();
+        for (int i = 0; i < team_count; i++) {
+            sorted_teams.push_back(&teams[i]);
         }
-        sort(sorted_teams.begin(), sorted_teams.end());
-        return sorted_teams;
+        sort(sorted_teams.begin(), sorted_teams.end(), TeamComparator());
+
+        // Update ranks
+        for (int i = 0; i < sorted_teams.size(); i++) {
+            sorted_teams[i]->rank = i + 1;
+        }
     }
 
     int getTeamRank(const string& team_name) {
-        vector<Team> sorted = getSortedTeams();
-        for (int i = 0; i < sorted.size(); i++) {
-            if (sorted[i].name == team_name) {
-                return i + 1;
-            }
-        }
-        return -1;
+        if (!team_index.count(team_name)) return -1;
+        return teams[team_index[team_name]].rank;
     }
 
-    void printScoreboard(const vector<Team>& sorted_teams) {
+    void printScoreboard() {
         for (int i = 0; i < sorted_teams.size(); i++) {
-            const Team& team = sorted_teams[i];
+            const Team& team = *sorted_teams[i];
             cout << team.name << " " << (i + 1) << " " << team.solved_problems
                  << " " << team.total_penalty;
 
             // Print problem status
-            for (char p = 'A'; p < 'A' + problem_count; p++) {
+            for (int p = 0; p < problem_count; p++) {
                 cout << " ";
-                const ProblemInfo& info = team.problems.at(p);
+                const ProblemInfo& info = team.problems[p];
 
                 if (frozen && !info.solved && info.submissions_after_freeze > 0) {
                     // Frozen problem
@@ -127,22 +151,23 @@ private:
     }
 
 public:
-    ICPCManager() : competition_started(false), frozen(false), duration_time(0), problem_count(0) {}
+    ICPCManager() : team_count(0), competition_started(false),
+                   frozen(false), duration_time(0), problem_count(0) {}
 
     void addTeam(const string& team_name) {
         if (competition_started) {
             cout << "[Error]Add failed: competition has started.\n";
             return;
         }
-        if (teams.count(team_name)) {
+        if (team_index.count(team_name)) {
             cout << "[Error]Add failed: duplicated team name.\n";
             return;
         }
 
-        Team team;
-        team.name = team_name;
-        teams[team_name] = team;
-        team_order.push_back(team_name);
+        teams[team_count].name = team_name;
+        teams[team_count].clear();
+        team_index[team_name] = team_count;
+        team_count++;
         cout << "[Info]Add successfully.\n";
     }
 
@@ -156,26 +181,23 @@ public:
         duration_time = duration;
         problem_count = problems;
 
-        // Initialize problems for all teams
-        for (auto& p : teams) {
-            for (char c = 'A'; c < 'A' + problem_count; c++) {
-                p.second.problems[c] = ProblemInfo();
-            }
-        }
+        // Initialize initial ranking
+        updateRanking();
 
         cout << "[Info]Competition starts.\n";
     }
 
     void submit(const string& problem, const string& team_name,
                 const string& status, int time) {
-        if (!teams.count(team_name)) return;
+        if (!team_index.count(team_name)) return;
 
-        char prob = problem[0];
-        Team& team = teams[team_name];
+        int idx = team_index[team_name];
+        Team& team = teams[idx];
+        int prob = problem[0] - 'A';
         ProblemInfo& info = team.problems[prob];
 
         // Record submission
-        all_submissions.emplace_back(team_name, prob, status, time);
+        all_submissions.emplace_back(team_name, problem[0], status, time);
 
         if (!info.solved) {
             if (frozen) {
@@ -196,6 +218,7 @@ public:
     }
 
     void flush() {
+        updateRanking();
         cout << "[Info]Flush scoreboard.\n";
     }
 
@@ -216,9 +239,11 @@ public:
 
         cout << "[Info]Scroll scoreboard.\n";
 
-        // Print scoreboard before scrolling (after flush)
-        vector<Team> before_teams = getSortedTeams();
-        printScoreboard(before_teams);
+        // Update ranking before scrolling
+        updateRanking();
+
+        // Print scoreboard before scrolling
+        printScoreboard();
 
         // Process unfreezing
         while (true) {
@@ -226,11 +251,11 @@ public:
             map<string, vector<char>> team_frozen_problems;
 
             // Collect all frozen problems
-            for (auto& p : teams) {
-                const Team& team = p.second;
-                for (const auto& prob : team.problems) {
-                    if (!prob.second.solved && prob.second.submissions_after_freeze > 0) {
-                        team_frozen_problems[team.name].push_back(prob.first);
+            for (int i = 0; i < team_count; i++) {
+                const Team& team = teams[i];
+                for (int p = 0; p < problem_count; p++) {
+                    if (!team.problems[p].solved && team.problems[p].submissions_after_freeze > 0) {
+                        team_frozen_problems[team.name].push_back('A' + p);
                     }
                 }
             }
@@ -238,12 +263,11 @@ public:
             if (team_frozen_problems.empty()) break;
 
             // Find lowest ranked team with frozen problems
-            vector<Team> current_ranking = getSortedTeams();
             string target_team;
             char target_problem = 0;
 
-            for (int i = current_ranking.size() - 1; i >= 0; i--) {
-                const Team& team = current_ranking[i];
+            for (int i = sorted_teams.size() - 1; i >= 0; i--) {
+                const Team& team = *sorted_teams[i];
                 if (team_frozen_problems.count(team.name)) {
                     target_team = team.name;
                     // Find smallest problem letter
@@ -256,23 +280,31 @@ public:
             if (target_team.empty()) break;
 
             // Unfreeze this problem
-            Team& team = teams[target_team];
-            ProblemInfo& info = team.problems[target_problem];
+            int team_idx = team_index[target_team];
+            Team& team = teams[team_idx];
+            int prob_idx = target_problem - 'A';
+            ProblemInfo& info = team.problems[prob_idx];
             info.submissions_after_freeze = 0;
 
-            // Check if ranking changed
-            vector<Team> after_teams = getSortedTeams();
+            // Store old ranking
+            vector<string> old_order;
+            for (Team* t : sorted_teams) {
+                old_order.push_back(t->name);
+            }
 
-            // Find old and new rank of the team
+            // Update ranking
+            updateRanking();
+
+            // Find if this team's ranking changed
             int old_rank = -1, new_rank = -1;
-            for (int i = 0; i < current_ranking.size(); i++) {
-                if (current_ranking[i].name == target_team) {
+            for (int i = 0; i < old_order.size(); i++) {
+                if (old_order[i] == target_team) {
                     old_rank = i + 1;
                     break;
                 }
             }
-            for (int i = 0; i < after_teams.size(); i++) {
-                if (after_teams[i].name == target_team) {
+            for (int i = 0; i < sorted_teams.size(); i++) {
+                if (sorted_teams[i]->name == target_team) {
                     new_rank = i + 1;
                     break;
                 }
@@ -283,10 +315,10 @@ public:
                 string replaced_team;
                 if (new_rank < old_rank) {
                     // Moved up - replaced the team at new_rank
-                    replaced_team = current_ranking[new_rank - 1].name;
+                    replaced_team = old_order[new_rank - 1];
                 } else {
                     // Moved down - replaced the team at old_rank
-                    replaced_team = current_ranking[old_rank - 1].name;
+                    replaced_team = old_order[old_rank - 1];
                 }
 
                 cout << target_team << " " << replaced_team << " "
@@ -295,14 +327,13 @@ public:
         }
 
         // Print final scoreboard
-        vector<Team> final_teams = getSortedTeams();
-        printScoreboard(final_teams);
+        printScoreboard();
 
         frozen = false;
     }
 
     void queryRanking(const string& team_name) {
-        if (!teams.count(team_name)) {
+        if (!team_index.count(team_name)) {
             cout << "[Error]Query ranking failed: cannot find the team.\n";
             return;
         }
@@ -318,7 +349,7 @@ public:
 
     void querySubmission(const string& team_name, const string& problem,
                         const string& status) {
-        if (!teams.count(team_name)) {
+        if (!team_index.count(team_name)) {
             cout << "[Error]Query submission failed: cannot find the team.\n";
             return;
         }
@@ -349,6 +380,10 @@ public:
 };
 
 int main() {
+    ios_base::sync_with_stdio(false);
+    cin.tie(nullptr);
+    cout.tie(nullptr);
+
     ICPCManager manager;
     string line;
 
