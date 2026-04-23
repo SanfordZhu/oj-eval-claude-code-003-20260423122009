@@ -30,8 +30,9 @@ struct Team {
     ProblemInfo problems[MAX_PROBLEMS];
     vector<int> solve_times;
     int rank;
+    bool has_been_flushed;  // Track if this team has been included in a flush
 
-    Team() : solved_problems(0), total_penalty(0), rank(0) {
+    Team() : solved_problems(0), total_penalty(0), rank(0), has_been_flushed(false) {
         for (int i = 0; i < MAX_PROBLEMS; i++) {
             problems[i] = ProblemInfo();
         }
@@ -41,6 +42,7 @@ struct Team {
         solved_problems = 0;
         total_penalty = 0;
         rank = 0;
+        has_been_flushed = false;
         solve_times.clear();
         for (int i = 0; i < MAX_PROBLEMS; i++) {
             problems[i] = ProblemInfo();
@@ -62,6 +64,17 @@ struct Submission {
 // Fast string comparison for team names
 struct TeamComparator {
     bool operator()(const Team* a, const Team* b) const {
+        // Before first flush, sort by lexicographic order
+        if (!a->has_been_flushed || !b->has_been_flushed) {
+            // If both haven't been flushed, compare names
+            // If one has been flushed and other hasn't, flushed ones come first
+            if (a->has_been_flushed != b->has_been_flushed) {
+                return a->has_been_flushed > b->has_been_flushed;
+            }
+            return a->name < b->name;
+        }
+
+        // After flush, use competition rules
         if (a->solved_problems != b->solved_problems)
             return a->solved_problems > b->solved_problems;
         if (a->total_penalty != b->total_penalty)
@@ -92,6 +105,7 @@ private:
     int problem_count;
     vector<Submission> all_submissions;
     vector<Team*> sorted_teams;
+    bool has_flushed;  // Track if any flush has occurred
 
     void updateRanking() {
         sorted_teams.clear();
@@ -103,6 +117,9 @@ private:
         // Update ranks
         for (int i = 0; i < sorted_teams.size(); i++) {
             sorted_teams[i]->rank = i + 1;
+            if (has_flushed) {
+                sorted_teams[i]->has_been_flushed = true;
+            }
         }
     }
 
@@ -152,7 +169,7 @@ private:
 
 public:
     ICPCManager() : team_count(0), competition_started(false),
-                   frozen(false), duration_time(0), problem_count(0) {}
+                   frozen(false), duration_time(0), problem_count(0), has_flushed(false) {}
 
     void addTeam(const string& team_name) {
         if (competition_started) {
@@ -181,7 +198,7 @@ public:
         duration_time = duration;
         problem_count = problems;
 
-        // Initialize initial ranking
+        // Initialize initial ranking (lexicographic)
         updateRanking();
 
         cout << "[Info]Competition starts.\n";
@@ -218,6 +235,7 @@ public:
     }
 
     void flush() {
+        has_flushed = true;
         updateRanking();
         cout << "[Info]Flush scoreboard.\n";
     }
